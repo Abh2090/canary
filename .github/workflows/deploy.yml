@@ -37,7 +37,7 @@ jobs:
       run: |
         docker push 851725487982.dkr.ecr.us-east-1.amazonaws.com/devops-app:latest
 
-    - name: Update kubeconfig
+    - name: Update kubeconfig file
       run: |
         aws eks update-kubeconfig --region us-east-1 --name devops-cluster
 
