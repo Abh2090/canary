@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI/CD Pipeline with Canary Deployment
 
 on:
   push:
@@ -9,6 +9,7 @@ env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: devops-app
   EKS_CLUSTER: devops-cluster
+  ACCOUNT_ID: 851725487982
 
 jobs:
   build-and-deploy:
@@ -31,9 +32,9 @@ jobs:
     - name: Login to Amazon ECR
       run: |
         aws ecr get-login-password --region $AWS_REGION | \
-        docker login --username AWS --password-stdin 851725487982.dkr.ecr.$AWS_REGION.amazonaws.com
+        docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
-    # 4️⃣ Set image tag (commit SHA)
+    # 4️⃣ Set image tag
     - name: Set image tag
       run: echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
 
@@ -42,22 +43,101 @@ jobs:
       run: |
         docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
 
-    # 6️⃣ Tag image for ECR
+    # 6️⃣ Tag image
     - name: Tag Docker image
       run: |
-        docker tag $ECR_REPOSITORY:$IMAGE_TAG 851725487982.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+        docker tag $ECR_REPOSITORY:$IMAGE_TAG $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-    # 7️⃣ Push image to ECR
-    - name: Push Docker image to ECR
+    # 7️⃣ Push image
+    - name: Push Docker image
       run: |
-        docker push 851725487982.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
     # 8️⃣ Update kubeconfig
     - name: Update kubeconfig
       run: |
         aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER
 
-    # 9️⃣ Deploy to EKS
-    - name: Deploy to EKS
+    # 9️⃣ Deploy new version to GREEN
+    - name: Deploy to EKS (Green)
       run: |
-        kubectl set image deployment/backend-green backend=851725487982.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG -n dev
+        kubectl set image deployment/backend-green backend=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG -n dev
+
+    # 🔟 Wait for rollout to stabilize
+    - name: Wait for rollout
+      run: |
+        kubectl rollout status deployment/backend-green -n dev
+
+    # 1️⃣1️⃣ Start Canary (10%)
+    - name: Canary 10%
+      run: |
+        kubectl annotate ingress backend-ingress \
+        alb.ingress.kubernetes.io/actions.forward-multiple='{
+          "Type": "forward",
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "ServiceName": "backend-blue-svc",
+                "ServicePort": "80",
+                "Weight": 90
+              },
+              {
+                "ServiceName": "backend-green-svc",
+                "ServicePort": "80",
+                "Weight": 10
+              }
+            ]
+          }
+        }' -n dev --overwrite
+
+    # 1️⃣2️⃣ Wait before next step
+    - name: Wait 60 seconds
+      run: sleep 60
+
+    # 1️⃣3️⃣ Increase to 50%
+    - name: Canary 50%
+      run: |
+        kubectl annotate ingress backend-ingress \
+        alb.ingress.kubernetes.io/actions.forward-multiple='{
+          "Type": "forward",
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "ServiceName": "backend-blue-svc",
+                "ServicePort": "80",
+                "Weight": 50
+              },
+              {
+                "ServiceName": "backend-green-svc",
+                "ServicePort": "80",
+                "Weight": 50
+              }
+            ]
+          }
+        }' -n dev --overwrite
+
+    # 1️⃣4️⃣ Wait again
+    - name: Wait 60 seconds
+      run: sleep 60
+
+    # 1️⃣5️⃣ Full rollout (100% Green)
+    - name: Full rollout
+      run: |
+        kubectl annotate ingress backend-ingress \
+        alb.ingress.kubernetes.io/actions.forward-multiple='{
+          "Type": "forward",
+          "ForwardConfig": {
+            "TargetGroups": [
+              {
+                "ServiceName": "backend-blue-svc",
+                "ServicePort": "80",
+                "Weight": 0
+              },
+              {
+                "ServiceName": "backend-green-svc",
+                "ServicePort": "80",
+                "Weight": 100
+              }
+            ]
+          }
+        }' -n dev --overwrite
