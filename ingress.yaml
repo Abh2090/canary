@@ -7,6 +7,7 @@ metadata:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
 
+    # 🔥 Canary routing (initial values - pipeline will override)
     alb.ingress.kubernetes.io/actions.forward-multiple: >
       {
         "Type": "forward",
@@ -15,17 +16,17 @@ metadata:
             {
               "ServiceName": "backend-blue-svc",
               "ServicePort": "80",
-              "Weight": 0
+              "Weight": 80
             },
             {
               "ServiceName": "backend-green-svc",
               "ServicePort": "80",
-              "Weight": 100
+              "Weight": 20
             }
           ]
         }
       }
-       
+
 spec:
   ingressClassName: alb
   rules:
@@ -35,6 +36,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: forward-multiple
+            name: backend-green-svc   # ✅ placeholder (must be real service)
             port:
-              name: use-annotation
+              number: 80

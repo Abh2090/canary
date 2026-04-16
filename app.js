@@ -1,6 +1,6 @@
 const http = require('http');
 
 http.createServer((req,res) => {
-	res.write(" Second testing from CI/CD pipeline 🚀");
+	res.write(" GREEN VERSION 🟢" );
 	res.end();
 }).listen(3000);
